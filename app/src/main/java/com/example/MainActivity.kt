@@ -6,7 +6,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +34,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -40,6 +41,7 @@ import coil.compose.AsyncImage
 import com.example.model.TaskStatus
 import com.example.model.TikTokVideoTask
 import com.example.ui.theme.MyApplicationTheme
+import com.example.utils.DownloadHelper
 import com.example.utils.LinkParser
 import com.example.viewmodel.TikTokViewModel
 
@@ -73,6 +75,15 @@ fun TikTokDownloaderScreen(
     val inputText by viewModel.inputText.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val isResolving by viewModel.isResolving.collectAsState()
+    val historyList by viewModel.historyList.collectAsState()
+
+    // Active Tab state: 0 = Downloader (Queue), 1 = History
+    var activeTab by remember { mutableStateOf(0) }
+
+    // Init the Room database repository once the screen starts
+    LaunchedEffect(Unit) {
+        viewModel.initRepository(context)
+    }
 
     // Detect the count of actual links from live text input
     val detectedLinksCount = remember(inputText) {
@@ -90,7 +101,7 @@ fun TikTokDownloaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Raw paste input card
             InputCard(
@@ -103,9 +114,12 @@ fun TikTokDownloaderScreen(
                 isResolving = isResolving
             )
 
+            // Storage Folder Quick Banner
+            StorageLocationCard()
+
             // Dynamic action banner for Bulk Download
             val successTasks = tasks.filter { it.status == TaskStatus.SUCCESS }
-            if (successTasks.isNotEmpty()) {
+            if (activeTab == 0 && successTasks.isNotEmpty()) {
                 BulkDownloadBanner(
                     successCount = successTasks.size,
                     totalCount = tasks.size,
@@ -113,22 +127,104 @@ fun TikTokDownloaderScreen(
                 )
             }
 
-            // Task list showing downloads or parsed objects
-            TaskListSection(
-                tasks = tasks,
-                isResolving = isResolving,
-                onDownloadIcon = { task, isAudio ->
-                    viewModel.downloadSingle(context, task, isAudio)
-                },
-                modifier = Modifier.weight(1f)
-            )
+            // Tab Switcher Row using modern FilterChips
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = activeTab == 0,
+                    onClick = { activeTab = 0 },
+                    label = { 
+                        Text(
+                            text = "Trình tải về" + if (tasks.isNotEmpty()) " (${tasks.size})" else "",
+                            fontWeight = FontWeight.Bold
+                        ) 
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = "Downloader Tab",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                FilterChip(
+                    selected = activeTab == 1,
+                    onClick = { activeTab = 1 },
+                    label = { 
+                        Text(
+                            text = "Lịch sử tải về" + if (historyList.isNotEmpty()) " (${historyList.size})" else "",
+                            fontWeight = FontWeight.Bold
+                        ) 
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "History Tab",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
+
+            // Body Area based on selected Tab
+            if (activeTab == 0) {
+                TaskListSection(
+                    tasks = tasks,
+                    isResolving = isResolving,
+                    onDownloadIcon = { task, isAudio ->
+                        viewModel.downloadSingle(context, task, isAudio)
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                HistoryListSection(
+                    historyList = historyList,
+                    onDownload = { id, downloadUrl, isAudio ->
+                        // Build context model to download & append in Room
+                        val matchedItem = historyList.find { it.id == id }
+                        val task = TikTokVideoTask(
+                            id = id,
+                            originalUrl = matchedItem?.originalUrl ?: downloadUrl,
+                            status = TaskStatus.SUCCESS,
+                            title = matchedItem?.title,
+                            coverUrl = matchedItem?.coverUrl,
+                            videoPlayUrl = matchedItem?.videoPlayUrl,
+                            musicUrl = matchedItem?.musicUrl,
+                            authorUsername = matchedItem?.authorUsername
+                        )
+                        viewModel.downloadSingle(context, task, isAudio)
+                    },
+                    onDelete = { id ->
+                        viewModel.deleteHistoryItem(id)
+                    },
+                    onClearAll = {
+                        viewModel.clearAllHistory()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
 
 @Composable
 fun HeaderSection() {
-    // Beautiful visual cyber-gradient banner matching TikTok's look
     val gradient = Brush.horizontalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.primary, // Neon Cyan
@@ -147,17 +243,17 @@ fun HeaderSection() {
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color.Black)
                     .border(1.5.dp, gradient, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.MovieFilter,
-                    contentDescription = "TikTok Logo Icon",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                Image(
+                    painter = painterResource(id = R.drawable.jl_logo),
+                    contentDescription = "JL Logo",
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop
                 )
             }
 
@@ -196,6 +292,11 @@ fun InputCard(
     onAnalyze: () -> Unit,
     isResolving: Boolean
 ) {
+    val context = LocalContext.current
+    val clipboardManager = remember {
+        context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -206,7 +307,7 @@ fun InputCard(
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.separated(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -272,11 +373,48 @@ fun InputCard(
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
             )
 
-            // Button Control Center
+            // Row 1: Helper Controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Clipboard paste Button
+                Button(
+                    onClick = {
+                        val clip = clipboardManager.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            val pastedText = clip.getItemAt(0).text?.toString() ?: ""
+                            if (pastedText.isNotBlank()) {
+                                if (inputText.isBlank()) {
+                                    onValueChange(pastedText)
+                                } else {
+                                    onValueChange(inputText + "\n" + pastedText)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        contentColor = MaterialTheme.colorScheme.secondary
+                    ),
+                    contentPadding = PaddingValues(vertical = 12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentPaste,
+                        contentDescription = "Paste Custom Icon",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Dán từ bộ nhớ",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 // Outlined Clean Button
                 OutlinedButton(
                     onClick = onClean,
@@ -292,7 +430,7 @@ fun InputCard(
                         contentDescription = "Clean Icon",
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Dọn liên kết",
                         maxLines = 1,
@@ -300,11 +438,17 @@ fun InputCard(
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
+            }
 
+            // Row 2: Main Commands
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 // Outlined Reset Button
                 OutlinedButton(
                     onClick = onRefresh,
-                    modifier = Modifier.weight(10f / 12f),
+                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
@@ -316,7 +460,7 @@ fun InputCard(
                         contentDescription = "Refresh Icon",
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Làm mới",
                         maxLines = 1,
@@ -349,7 +493,7 @@ fun InputCard(
                             contentDescription = "Analyze Icon",
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Phân tích",
                             maxLines = 1,
@@ -358,6 +502,73 @@ fun InputCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun StorageLocationCard() {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FolderOpen,
+                    contentDescription = "Folder Icon",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Column {
+                    Text(
+                        text = "Vị trí lưu trữ video",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Thư mục Tải xuống > " + DownloadHelper.getStorageLocationDescription(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            TextButton(
+                onClick = { DownloadHelper.openDownloadsFolder(context) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Launch,
+                    contentDescription = "Open directory",
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Mở thư mục",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                )
             }
         }
     }
@@ -453,7 +664,7 @@ fun TaskListSection(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Danh sách video tải xuống",
+                text = "Danh sách phân tích",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground
@@ -721,7 +932,7 @@ fun EmptyListPlaceholder() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
+            .height(180.dp)
             .border(
                 1.5.dp,
                 Brush.linearGradient(
@@ -747,7 +958,7 @@ fun EmptyListPlaceholder() {
                 imageVector = Icons.Default.DownloadForOffline,
                 contentDescription = "Placeholder icon downloads",
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(44.dp)
             )
             Text(
                 text = "Hộp tải trống",
@@ -756,7 +967,7 @@ fun EmptyListPlaceholder() {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
             Text(
-                text = "Dán liên kết phía trên, dọn dẹp và bấm 'Phân tích' để xem danh sách tải xuống của bạn.",
+                text = "Dán các chia sẻ TikTok phía trên và bấm 'Phân tích' để bắt đầu.",
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
@@ -765,7 +976,269 @@ fun EmptyListPlaceholder() {
     }
 }
 
-// Extension function to allow Arrangement.separated in Material 3 Rows/Columns
-private fun Arrangement.separated(space: androidx.compose.ui.unit.Dp): Arrangement.Vertical {
-    return Arrangement.spacedBy(space)
+@Composable
+fun HistoryListSection(
+    historyList: List<com.example.data.HistoryEntity>,
+    onDownload: (String, String, Boolean) -> Unit, // id, url, isAudio
+    onDelete: (String) -> Unit,
+    onClearAll: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Lịch sử đã tải",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            if (historyList.isNotEmpty()) {
+                TextButton(
+                    onClick = onClearAll,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear all history",
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Xoá tất cả",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        }
+
+        if (historyList.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                        RoundedCornerShape(16.dp)
+                    )
+                    .background(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(16.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HistoryToggleOff,
+                        contentDescription = "Empty history icon",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        modifier = Modifier.size(44.dp)
+                    )
+                    Text(
+                        text = "Chưa có lưu trữ nào",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                    Text(
+                        text = "Vui lòng tải xuống một số video để xem lịch sử được lưu tự động.",
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                items(historyList, key = { it.id }) { item ->
+                    HistoryCardItem(
+                        item = item,
+                        onDownload = { isAudio -> 
+                            val downloadUrl = if (isAudio) item.musicUrl else item.videoPlayUrl
+                            if (downloadUrl != null) {
+                                onDownload(item.id, downloadUrl, isAudio)
+                            }
+                        },
+                        onDelete = { onDelete(item.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoryCardItem(
+    item: com.example.data.HistoryEntity,
+    onDownload: (Boolean) -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Cover Art Thumbnail
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.background)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                            RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (item.coverUrl != null) {
+                        AsyncImage(
+                            model = item.coverUrl,
+                            contentDescription = "Thumbnail cover",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = "Default Icon",
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Text details
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    if (item.authorUsername != null) {
+                        Text(
+                            text = "@${item.authorUsername}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Format Time: Time of download
+                    val formattedTime = remember(item.timestamp) {
+                        val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+                        sdf.format(java.util.Date(item.timestamp))
+                    }
+                    Text(
+                        text = "Đã tải: $formattedTime",
+                        style = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+                    )
+                }
+
+                // Single Delete Button
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Delete item",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Video Play Download button
+                if (item.videoPlayUrl != null) {
+                    FilledTonalButton(
+                        onClick = { onDownload(false) },
+                        modifier = Modifier.weight(1.2f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            contentColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = "Video Icon",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Tải lại Video",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+
+                // Audio extraction download button
+                if (item.musicUrl != null) {
+                    FilledTonalButton(
+                        onClick = { onDownload(true) },
+                        modifier = Modifier.weight(0.9f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f),
+                            contentColor = MaterialTheme.colorScheme.secondary
+                        ),
+                        contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = "Music Icon",
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Tải lại MP3",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

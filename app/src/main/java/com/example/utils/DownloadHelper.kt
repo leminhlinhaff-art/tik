@@ -61,4 +61,38 @@ object DownloadHelper {
             return -1L
         }
     }
+
+    /**
+     * Return the readable string of the storage location.
+     */
+    fun getStorageLocationDescription(): String {
+        return "Bộ nhớ trong > Download (Tải xuống)"
+    }
+
+    /**
+     * Opens the system Downloads folder.
+     */
+    fun openDownloadsFolder(context: Context) {
+        val intent = android.content.Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                context.startActivity(fallbackIntent)
+            } catch (ex: Exception) {
+                Toast.makeText(
+                    context, 
+                    "Vị trí lưu: Tải xuống\nKhông thể mở trực tiếp trình quản lý tệp.", 
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
 }

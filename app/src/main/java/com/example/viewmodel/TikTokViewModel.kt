@@ -25,6 +25,67 @@ class TikTokViewModel : ViewModel() {
     private val _isResolving = MutableStateFlow(false)
     val isResolving: StateFlow<Boolean> = _isResolving.asStateFlow()
 
+    // Download history state
+    private var repository: com.example.data.HistoryRepository? = null
+    private val _historyList = MutableStateFlow<List<com.example.data.HistoryEntity>>(emptyList())
+    val historyList: StateFlow<List<com.example.data.HistoryEntity>> = _historyList.asStateFlow()
+
+    /**
+     * Initializes the Room Repository and starts collecting saved download history items.
+     */
+    fun initRepository(context: Context) {
+        if (repository == null) {
+            val database = com.example.data.AppDatabase.getDatabase(context)
+            val repo = com.example.data.HistoryRepository(database.historyDao())
+            repository = repo
+            viewModelScope.launch {
+                repo.allHistory.collect { list ->
+                    _historyList.value = list
+                }
+            }
+        }
+    }
+
+    /**
+     * Inserts an item into the Room download history database.
+     */
+    fun addToHistory(task: TikTokVideoTask) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            val item = com.example.data.HistoryEntity(
+                id = task.id,
+                originalUrl = task.originalUrl,
+                title = task.title ?: "Video không tiêu đề",
+                coverUrl = task.coverUrl,
+                videoPlayUrl = task.videoPlayUrl,
+                musicUrl = task.musicUrl,
+                authorUsername = task.authorUsername ?: task.authorName ?: "tiktok_user",
+                timestamp = System.currentTimeMillis()
+            )
+            repo.insert(item)
+        }
+    }
+
+    /**
+     * Deletes a single item from history.
+     */
+    fun deleteHistoryItem(id: String) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            repo.deleteById(id)
+        }
+    }
+
+    /**
+     * Clears all items in history.
+     */
+    fun clearAllHistory() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            repo.clearAll()
+        }
+    }
+
     fun onInputTextChanged(text: String) {
         _inputText.value = text
     }
@@ -132,6 +193,7 @@ class TikTokViewModel : ViewModel() {
                     isAudio = false,
                     id = task.id
                 )
+                addToHistory(task)
             }
         }
     }
@@ -149,6 +211,7 @@ class TikTokViewModel : ViewModel() {
                 isAudio = isAudio,
                 id = task.id
             )
+            addToHistory(task)
         }
     }
 }
