@@ -1,0 +1,6 @@
+{
+  "name": "TikTok Downloader",
+  "description": "Ứng dụng tải video TikTok hàng loạt chất lượng cao, hỗ trợ tự động dọn dẹp liên kết và tải video không logo hoặc tải nhạc MP3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
